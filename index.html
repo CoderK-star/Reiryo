@@ -9,6 +9,17 @@
     <!-- MapLibre GL JS -->
     <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
     <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+    <!-- Pannellum for 360° street view -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
+    <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+    <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-Y4J0KEG3PF"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-Y4J0KEG3PF');
+</script>
     
     <style>
         * {
@@ -29,6 +40,29 @@
             left: 0;
             width: 100%;
             height: 100%;
+            transition: all 0.4s ease;
+        }
+
+        body.street-mode #map {
+            width: min(260px, 28vw);
+            height: min(260px, 28vw);
+            top: 20px;
+            right: auto;
+            left: 20px;
+            bottom: auto;
+            border-radius: 22px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+            border: 2px solid rgba(255,255,255,0.3);
+            z-index: 1300;
+        }
+
+        body.street-mode #map::after {
+            content: '';
+            position: absolute;
+            inset: 12px;
+            border: 2px dashed rgba(255,255,255,0.35);
+            border-radius: 16px;
+            pointer-events: none;
         }
 
         /* Site Logo */
@@ -42,7 +76,7 @@
             pointer-events: auto;
             display: block;
             cursor: pointer;
-            transition: transform 0.2s ease;
+            transition: transform 0.2s ease, opacity 0.3s ease;
         }
 
         #site-logo:hover {
@@ -56,6 +90,11 @@
             filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
         }
 
+        body.street-mode #site-logo {
+            opacity: 0;
+            pointer-events: none;
+        }
+
         /* Top Controls Container */
         #top-controls {
             position: absolute;
@@ -63,6 +102,12 @@
             left: 142px;
             right: 390px;
             z-index: 1000;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        body.street-mode #top-controls {
+            opacity: 0;
             pointer-events: none;
         }
 
@@ -176,16 +221,44 @@
             overflow-y: auto;
             display: flex;
             flex-direction: column;
+            pointer-events: auto;
+            transition: opacity 0.3s ease;
+        }
+
+        body.street-mode #side-panel {
+            opacity: 0;
             pointer-events: none;
         }
 
         #panel-header {
-            display: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            pointer-events: auto;
+        }
+
+        .panel-header-text {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        #panel-header h2 {
+            font-size: 18px;
+            color: #1a237e;
         }
 
         #panel-count {
-            display: none;
+            font-size: 13px;
+            color: #666;
         }
+
 
         #panel-content {
             flex: 1;
@@ -313,6 +386,26 @@
             min-width: 200px;
         }
 
+        .streetview-marker-popup .maplibregl-popup-content {
+            background: rgba(12, 18, 26, 0.95);
+            padding: 12px 16px;
+            min-width: 180px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+        }
+
+        .streetview-popup-body {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .streetview-popup-label {
+            color: rgba(255,255,255,0.8);
+            font-size: 13px;
+            margin: 0;
+        }
+
         .popup-header {
             padding: 12px;
             font-weight: 600;
@@ -350,13 +443,56 @@
         /* Basemap Toggle */
         #basemap-toggle {
             position: absolute;
-            bottom: 30px;
+            bottom: 110px;
             left: 20px;
             z-index: 1000;
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             overflow: hidden;
+            transition: opacity 0.3s ease;
+        }
+
+        body.street-mode #basemap-toggle {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+
+        #streetview-anchor-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1200;
+            width: 62px;
+            height: 62px;
+            border-radius: 18px;
+            border: none;
+            background: rgba(15, 23, 42, 0.9);
+            color: #fff;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            box-shadow: 0 14px 35px rgba(0,0,0,0.35);
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+
+        #streetview-anchor-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+        }
+
+        #streetview-anchor-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.2);
+        }
+
+        #streetview-anchor-btn.active,
+        body.street-mode #streetview-anchor-btn {
+            background: linear-gradient(135deg, #5c6bc0, #1e88e5);
         }
 
         .basemap-btn {
@@ -490,19 +626,20 @@
             }
 
             #basemap-toggle {
-                bottom: calc(30% + 20px);
+                bottom: calc(30% + 90px);
                 left: 10px;
                 transition: bottom 0.3s ease;
             }
 
             #side-panel.expanded ~ #basemap-toggle {
-                bottom: 20px;
+                bottom: 90px;
             }
 
             /* When closed, bring basemap toggle down */
             #side-panel.closed ~ #basemap-toggle {
-                bottom: 20px;
+                bottom: 90px;
             }
+
 
             .custom-marker {
                 width: 52px;
@@ -538,7 +675,7 @@
             }
 
             #basemap-toggle {
-                bottom: calc(30% + 20px);
+                bottom: calc(30% + 90px);
             }
 
             .category-btn {
@@ -592,6 +729,324 @@
         #error-banner.show {
             display: block;
         }
+
+        /* Street view overlay */
+        #street-viewer {
+            position: absolute;
+            inset: 0;
+            z-index: 1200;
+            background: #05060a;
+            display: flex;
+            flex-direction: column;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s ease;
+        }
+
+        body.street-mode #street-viewer {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #street-viewer-canvas {
+            flex: 1;
+            min-height: 0;
+        }
+
+        #streetview-exit-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1400;
+            border: none;
+            background: rgba(15,15,18,0.7);
+            color: white;
+            padding: 10px 18px;
+            border-radius: 999px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+        }
+
+        #streetview-info-panel {
+            position: absolute;
+            left: 20px;
+            right: 20px;
+            bottom: 18px;
+            width: auto;
+            transform: translateY(0);
+            background: rgba(14, 18, 27, 0.92);
+            color: #fff;
+            border-radius: 16px;
+            padding: 28px 20px 18px;
+            box-shadow: 0 18px 55px rgba(91, 87, 87, 0.45);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            transition: transform 0.35s ease;
+        }
+
+        #streetview-info-panel.collapsed {
+            transform: translateY(calc(100% - 48px));
+        }
+
+        .streetview-info-content {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            transition: opacity 0.25s ease;
+        }
+
+        #streetview-info-panel.collapsed .streetview-info-content {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #streetview-panel-toggle {
+            position: absolute;
+            top: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 42px;
+            height: 24px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.12);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+        }
+
+        #streetview-panel-toggle::before {
+            content: '';
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 7px solid #fff;
+            transition: transform 0.25s ease;
+        }
+
+        #streetview-info-panel.collapsed #streetview-panel-toggle::before {
+            transform: rotate(180deg);
+        }
+
+        .streetview-info-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .streetview-info-actions button {
+            border: 1px solid rgba(255,255,255,0.4);
+            background: transparent;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        #streetview-current-title {
+            font-size: 20px;
+            margin: 4px 0;
+        }
+
+        #streetview-current-meta {
+            color: rgba(255,255,255,0.75);
+            font-size: 14px;
+        }
+
+        .streetview-current-location-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin: 4px 0;
+            color: rgba(255,255,255,0.88);
+            font-size: 14px;
+        }
+
+        .streetview-current-building {
+            font-weight: 600;
+        }
+
+        .streetview-location-floor-chip {
+            padding: 2px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            font-size: 12px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .streetview-location-card-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px 12px;
+            gap: 8px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.74);
+        }
+
+        .streetview-location-card-place {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .streetview-panel-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.6);
+        }
+
+        #streetview-location-carousel {
+            display: flex;
+            gap: 12px;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .streetview-location-card {
+            border: none;
+            background: rgba(255,255,255,0.12);
+            color: white;
+            padding: 0;
+            border-radius: 14px;
+            cursor: pointer;
+            min-width: 140px;
+            max-width: 170px;
+            flex: 0 0 auto;
+            overflow: hidden;
+            box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .streetview-location-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 26px rgba(0,0,0,0.45);
+        }
+
+        .streetview-location-card.active {
+            box-shadow: 0 18px 40px rgba(66,165,245,0.5);
+        }
+
+        .streetview-location-card-thumb {
+            width: 100%;
+            height: 92px;
+            background-size: cover;
+            background-position: center;
+            filter: saturate(1.08);
+        }
+
+        .streetview-location-card-title {
+            display: block;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            text-align: left;
+            color: #fff;
+            background: linear-gradient(180deg, rgba(5,8,12,0.65), rgba(5,8,12,0.9));
+            min-height: 48px;
+        }
+
+        .streetview-location-card-title small {
+            display: block;
+            color: rgba(255,255,255,0.7);
+            font-weight: 400;
+            font-size: 11px;
+            margin-top: 2px;
+        }
+
+        .streetview-nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 54px;
+            height: 54px;
+            border-radius: 16px;
+            border: none;
+            background: rgba(5, 6, 10, 0.65);
+            color: #fff;
+            font-size: 26px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.45);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            z-index: 1350;
+        }
+
+        #streetview-nav-prev {
+            left: 18px;
+        }
+
+        #streetview-nav-next {
+            right: 18px;
+        }
+
+        body.street-mode .streetview-nav-btn {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .streetview-nav-btn:disabled {
+            opacity: 0.25 !important;
+            cursor: default;
+        }
+
+        .streetview-chip {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.12);
+            font-size: 12px;
+            letter-spacing: 0.05em;
+        }
+
+        body:not(.street-mode) #street-viewer {
+            pointer-events: none;
+        }
+
+        @media (max-width: 768px) {
+            body.street-mode #map {
+                width: min(48vw, 220px);
+                height: min(48vw, 220px);
+                left: 10px;
+                top: 10px;
+                bottom: auto;
+            }
+
+            #streetview-info-panel {
+                left: 12px;
+                right: 12px;
+                bottom: 12px;
+                width: auto;
+                padding: 26px 16px 14px;
+            }
+
+            #streetview-info-panel.collapsed {
+                transform: translateY(calc(100% - 36px));
+            }
+
+            .streetview-info-main {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            #streetview-current-title {
+                font-size: 18px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -631,13 +1086,49 @@
     <div id="side-panel">
         <div id="panel-drag-handle"></div>
         <div id="panel-header">
-            <h2>場所</h2>
-            <div id="panel-count">読み込み中...</div>
+            <div class="panel-header-text">
+                <h2>場所</h2>
+                <div id="panel-count">読み込み中...</div>
+            </div>
         </div>
         <div id="panel-content">
             <!-- Panel items will be dynamically generated -->
         </div>
     </div>
+
+    <!-- Street view overlay -->
+    <div id="street-viewer" aria-hidden="true">
+        <button id="streetview-exit-btn" type="button">2Dマップに戻る</button>
+        <div id="street-viewer-canvas"></div>
+        <button id="streetview-nav-prev" class="streetview-nav-btn" type="button" aria-label="前のスポット">&lsaquo;</button>
+        <button id="streetview-nav-next" class="streetview-nav-btn" type="button" aria-label="次のスポット">&rsaquo;</button>
+        <div id="streetview-info-panel">
+            <button id="streetview-panel-toggle" type="button" aria-expanded="true" aria-label="情報パネルを折りたたむ"></button>
+            <div class="streetview-info-content">
+                <div class="streetview-info-main">
+                    <div>
+                        <span id="streetview-current-category" class="streetview-chip"></span>
+                        <h3 id="streetview-current-title">ストリートビュー</h3>
+                        <div class="streetview-current-location-row" aria-live="polite">
+                            <span id="streetview-current-building" class="streetview-current-building"></span>
+                            <span id="streetview-current-floor" class="streetview-location-floor-chip"></span>
+                        </div>
+                        <p id="streetview-current-meta"></p>
+                    </div>
+                    <div class="streetview-info-actions">
+                        <button id="streetview-back-to-map" type="button">マップモードに戻る</button>
+                    </div>
+                </div>
+                <div class="streetview-info-secondary">
+                    <div id="streetview-location-carousel"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button id="streetview-anchor-btn" type="button" aria-pressed="false" aria-label="360°ビューを切り替え" title="360°ビューを切り替え">
+        360°
+    </button>
 
     <!-- Basemap Toggle -->
     <div id="basemap-toggle">

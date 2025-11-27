@@ -32,23 +32,27 @@ let allData = [];
 let activeCategories = new Set();
 let searchQuery = "";
 let selectedMarkerEl = null; // currently selected DOM marker element
+let streetViewState = { active: false, currentItem: null, catalog: [], contextItems: [] };
+let pannellumViewer = null;
+let streetViewPopup = null;
+let lastMarkerItems = null;
 
 // Initialize map when data is loaded
 window.initmap = function() {
-    console.log("Initializing map with data:", window.dataObject);
-    
+    console.log('Initializing map with data:', window.dataObject);
+
     if (!window.dataObject || window.dataObject.length === 0) {
-        showError("No data available. Please check the data source.");
+        showError('No data available. Please check the data source.');
         hideLoading();
         return;
     }
 
     allData = window.dataObject;
+    refreshStreetViewCatalog();
     initializeMap();
     createCategoryButtons();
     setupEventListeners();
-    
-    // Render markers after map loads to ensure proper bounds calculation
+
     if (map.loaded()) {
         renderMarkersAndPanel();
     } else {
@@ -56,30 +60,29 @@ window.initmap = function() {
             renderMarkersAndPanel();
         });
     }
-    
+
     hideLoading();
 };
 
-// Initialize MapLibre map
 function initializeMap() {
     map = new maplibregl.Map({
         container: 'map',
         style: {
             version: 8,
             sources: {
-                "satellite": {
-                    type: "raster",
-                    tiles: ["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
+                satellite: {
+                    type: 'raster',
+                    tiles: ['https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}'],
                     tileSize: 256,
-                    attribution: "© Google",
+                    attribution: '© Google',
                     maxzoom: 21
                 }
             },
             layers: [
                 {
-                    id: "satellite-layer",
-                    type: "raster",
-                    source: "satellite"
+                    id: 'satellite-layer',
+                    type: 'raster',
+                    source: 'satellite'
                 }
             ]
         },
@@ -87,30 +90,30 @@ function initializeMap() {
         zoom: CONFIG.zoom
     });
 
-    // Add watercolor overlay when map loads
     let mapLoaded = false;
     map.on('load', () => {
         if (!mapLoaded) {
             mapLoaded = true;
             addWatercolorOverlay();
-            // Satellite layer stays visible as the base
         }
     });
 
-    // Navigation controls removed per user request
+    const canvasContainer = map.getCanvasContainer();
+    if (canvasContainer) {
+        canvasContainer.addEventListener('click', handleMapBackgroundClick);
+    }
 }
 
-// Add watercolor basemap overlay
 function addWatercolorOverlay() {
     const bounds = CONFIG.watercolorBounds;
-    
+
     if (!map.getSource('watercolor-overlay')) {
         map.addSource('watercolor-overlay', {
             type: 'image',
             url: 'images/watercolorbasemap.png',
             coordinates: [bounds.UL, bounds.UR, bounds.LR, bounds.LL]
         });
-        
+
         map.addLayer({
             id: 'watercolor-overlay-layer',
             type: 'raster',
@@ -127,20 +130,17 @@ function createCategoryButtons() {
     const container = document.getElementById('category-buttons');
     container.innerHTML = '';
 
-    // Get unique categories from data
     const categoriesInData = new Set();
     allData.forEach(item => {
-        const cat = (item.category || "場所").trim();
+        const cat = (item.category || '場所').trim();
         categoriesInData.add(cat);
     });
 
-    // Add "All" button
     const allBtn = createButton('すべて', '#333');
     allBtn.classList.add('active');
     allBtn.addEventListener('click', () => toggleCategory('all', allBtn));
     container.appendChild(allBtn);
 
-    // Define the fixed order for categories
     const categoryOrder = [
         'ゲストイベント',
         '一日目',
@@ -150,7 +150,6 @@ function createCategoryButtons() {
         '展示'
     ];
 
-    // Add category buttons in the specified order (only if present in data)
     categoryOrder.forEach(category => {
         if (categoriesInData.has(category)) {
             const config = CATEGORIES[category] || { color: DEFAULT_COLOR, label: category };
@@ -160,7 +159,6 @@ function createCategoryButtons() {
         }
     });
 
-    // Add any remaining categories not in the predefined order
     categoriesInData.forEach(category => {
         if (!categoryOrder.includes(category)) {
             const config = CATEGORIES[category] || { color: DEFAULT_COLOR, label: category };
@@ -300,6 +298,9 @@ function renderMarkersAndPanel() {
     markers.forEach(marker => marker.remove());
     markers = [];
     selectedMarkerEl = null;
+    hideStreetViewPopup();
+    lastMarkerItems = null;
+    updateStreetViewPanelButton(null, null);
 
     const filteredData = getFilteredData();
     const groupedData = groupByCoordinates(filteredData);
@@ -351,6 +352,8 @@ function renderMarkersAndPanel() {
                 zoom: 18,
                 duration: 1000
             });
+
+            showStreetViewPopup([lon, lat], items);
         });
 
         markers.push(marker);
@@ -361,6 +364,33 @@ function renderMarkersAndPanel() {
     
     // Zoom to fit all visible markers
     fitMapToMarkers(filteredData);
+}
+
+function clearMarkerSelection() {
+    if (selectedMarkerEl) {
+        selectedMarkerEl.classList.remove('selected');
+        selectedMarkerEl = null;
+    }
+    lastMarkerItems = null;
+    hideStreetViewPopup();
+    updateSidePanel(getFilteredData());
+}
+
+function handleMapBackgroundClick(event) {
+    if (streetViewState.active) return;
+    const target = event?.target;
+    if (target && typeof target.closest === 'function') {
+        if (target.closest('.custom-marker') ||
+            target.closest('#side-panel') ||
+            target.closest('#streetview-anchor-btn') ||
+            target.closest('#basemap-toggle') ||
+            target.closest('#street-viewer')) {
+            return;
+        }
+    }
+    if (selectedMarkerEl) {
+        clearMarkerSelection();
+    }
 }
 
 // Fit map bounds to show all filtered markers
@@ -395,6 +425,14 @@ function updatePanelWithItems(items) {
     
     count.textContent = `このマーカーに${items.length}件の場所`;
     content.innerHTML = '';
+    lastMarkerItems = items;
+
+    if (items.length && Number.isFinite(items[0].lon) && Number.isFinite(items[0].lat)) {
+        showStreetViewPopup([items[0].lon, items[0].lat], items);
+    } else {
+        hideStreetViewPopup();
+        updateStreetViewPanelButton(null, null);
+    }
 
     items.forEach(item => {
         const category = (item.category || "場所").trim();
@@ -499,6 +537,10 @@ function updateSidePanel(data) {
     
     count.textContent = `${data.length}件の場所が見つかりました`;
     content.innerHTML = '';
+    if (!selectedMarkerEl) {
+        lastMarkerItems = null;
+        updateStreetViewPanelButton(null, null);
+    }
 
     if (data.length === 0) {
         content.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">場所が見つかりません</p>';
@@ -695,6 +737,29 @@ function setupEventListeners() {
     // Adjust basemap toggle initially and on resize
     setTimeout(updateBasemapTogglePosition, 0);
     window.addEventListener('resize', updateBasemapTogglePosition);
+
+    const exitBtn = document.getElementById('streetview-exit-btn');
+    if (exitBtn) exitBtn.addEventListener('click', exitStreetView);
+    const backBtn = document.getElementById('streetview-back-to-map');
+    if (backBtn) backBtn.addEventListener('click', exitStreetView);
+    const prevBtn = document.getElementById('streetview-nav-prev');
+    if (prevBtn) prevBtn.addEventListener('click', () => navigateStreetView(-1));
+    const nextBtn = document.getElementById('streetview-nav-next');
+    if (nextBtn) nextBtn.addEventListener('click', () => navigateStreetView(1));
+    const panelToggle = document.getElementById('streetview-panel-toggle');
+    const infoPanel = document.getElementById('streetview-info-panel');
+    if (panelToggle && infoPanel) {
+        panelToggle.addEventListener('click', () => {
+            const collapsed = infoPanel.classList.toggle('collapsed');
+            panelToggle.setAttribute('aria-expanded', String(!collapsed));
+        });
+    }
+
+    document.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Escape' && streetViewState.active) {
+            exitStreetView();
+        }
+    });
 }
 
 // Setup draggable panel for mobile
@@ -827,6 +892,8 @@ function updateBasemapTogglePosition() {
 
     const windowHeight = window.innerHeight;
     const panelHeight = panel.offsetHeight || 0;
+    const anchorBtn = document.getElementById('streetview-anchor-btn');
+    const anchorOffset = (anchorBtn ? anchorBtn.offsetHeight || 0 : 0) + 40;
     const isClosed = panel.classList.contains('closed') || panelHeight <= 52;
     const isExpanded = panel.classList.contains('expanded') || panelHeight >= windowHeight * 0.98;
 
@@ -834,15 +901,15 @@ function updateBasemapTogglePosition() {
         // Panel covers screen; hide toggle under it
         toggle.style.opacity = '0';
         toggle.style.pointerEvents = 'none';
-        toggle.style.bottom = '20px';
+        toggle.style.bottom = `${anchorOffset}px`;
     } else if (isClosed) {
         // Keep near bottom when closed
         toggle.style.opacity = '1';
         toggle.style.pointerEvents = '';
-        toggle.style.bottom = '20px';
+        toggle.style.bottom = `${anchorOffset}px`;
     } else {
         // Place above the sheet top edge
-        const bottomPx = Math.min(windowHeight - 80, panelHeight + 20);
+        const bottomPx = Math.min(windowHeight - 80, panelHeight + anchorOffset);
         toggle.style.opacity = '1';
         toggle.style.pointerEvents = '';
         toggle.style.bottom = `${bottomPx}px`;
@@ -860,6 +927,354 @@ function switchBasemap(basemap) {
         // Hide watercolor overlay, show only satellite
         map.setPaintProperty('watercolor-overlay-layer', 'raster-opacity', 0);
     }
+}
+
+function showStreetViewPopup(lngLat, itemsAtMarker) {
+    if (!map) return;
+    const streetItems = Array.isArray(itemsAtMarker) ? itemsAtMarker.filter(hasStreetView) : [];
+    if (!streetItems.length) {
+        hideStreetViewPopup();
+        updateStreetViewPanelButton(null, null);
+        return;
+    }
+
+    if (!streetViewPopup) {
+        streetViewPopup = new maplibregl.Popup({
+            closeButton: false,
+            closeOnClick: false,
+            className: 'streetview-marker-popup',
+            offset: 18
+        });
+    }
+
+    const container = document.createElement('div');
+    container.className = 'streetview-popup-body';
+    const label = document.createElement('p');
+    label.className = 'streetview-popup-label';
+    label.textContent = `${streetItems.length}件の360°スポット`;
+    container.appendChild(label);
+
+    streetViewPopup
+        .setLngLat(lngLat)
+        .setDOMContent(container)
+        .addTo(map);
+
+    updateStreetViewPanelButton(itemsAtMarker, itemsAtMarker);
+}
+
+function hideStreetViewPopup() {
+    if (streetViewPopup) {
+        streetViewPopup.remove();
+    }
+}
+
+function updateStreetViewPanelButton(streetItems, itemsAtMarker) {
+    const anchorBtn = document.getElementById('streetview-anchor-btn');
+    if (!anchorBtn) return;
+
+    const localItems = Array.isArray(streetItems) ? streetItems.filter(hasStreetView) : [];
+    const catalogItems = streetViewState.catalog.filter(hasStreetView);
+    const isActive = streetViewState.active;
+    const canToggle = isActive || localItems.length > 0 || catalogItems.length > 0;
+
+    const handleToggle = () => {
+        if (streetViewState.active) {
+            exitStreetView();
+            return;
+        }
+
+        if (localItems.length) {
+            const context = Array.isArray(itemsAtMarker) && itemsAtMarker.length ? itemsAtMarker : localItems;
+            enterStreetView(localItems[0], context);
+            return;
+        }
+
+        if (catalogItems.length) {
+            enterStreetView(catalogItems[0], catalogItems);
+            return;
+        }
+
+        showError('360°スポットが登録されていません。');
+    };
+
+    if (anchorBtn) {
+        anchorBtn.disabled = !canToggle;
+        anchorBtn.setAttribute('aria-pressed', String(isActive));
+        anchorBtn.classList.toggle('active', isActive);
+        anchorBtn.onclick = canToggle ? handleToggle : null;
+    }
+}
+
+function refreshStreetViewCatalog() {
+    streetViewState.catalog = allData.filter(hasStreetView);
+    if (streetViewState.active && streetViewState.currentItem && !hasStreetView(streetViewState.currentItem)) {
+        exitStreetView();
+    } else {
+        updateStreetViewInfoPanel();
+    }
+    const contextItems = Array.isArray(lastMarkerItems) && lastMarkerItems.length ? lastMarkerItems : null;
+    updateStreetViewPanelButton(contextItems, contextItems || streetViewState.catalog);
+}
+
+function hasStreetView(item) {
+    return Boolean(resolveStreetImage(item));
+}
+
+function resolveStreetImage(item) {
+    if (!item) return '';
+    const raw = item.streetViewImage || item.streetviewImage || item.streetview || item.panorama || '';
+    if (!raw) return '';
+    const trimmed = String(raw).trim();
+    if (!trimmed) return '';
+    const normalized = trimmed.replace(/\\/g, '/');
+    if (/^https?:\/\//i.test(normalized)) return normalized;
+    if (normalized.startsWith('images/')) return normalized;
+    if (normalized.startsWith('part')) return `images/${normalized}`;
+    if (normalized.startsWith('/')) return normalized.slice(1);
+    return `images/part2/${normalized}`;
+}
+
+function getStreetThumbnail(item) {
+    const pano = resolveStreetImage(item);
+    if (pano) return pano;
+    const img = item?.imageUrl || item?.image;
+    if (!img) return '';
+    const normalized = String(img).trim().replace(/\\/g, '/');
+    if (/^https?:\/\//i.test(normalized)) return normalized;
+    if (normalized.startsWith('images/')) return normalized;
+    if (normalized.startsWith('icons/')) return normalized;
+    if (normalized.startsWith('part')) return `images/${normalized}`;
+    if (normalized.startsWith('/')) return normalized.slice(1);
+    return normalized;
+}
+
+function enterStreetView(item, contextItems) {
+    if (!item) return;
+    const panorama = resolveStreetImage(item);
+    if (!panorama) {
+        showError('この場所には360°画像が登録されていません。');
+        return;
+    }
+
+    if (!window.pannellum || typeof window.pannellum.viewer !== 'function') {
+        console.error('Pannellum viewer is not available.');
+        return;
+    }
+
+    if (!streetViewState.catalog.length) {
+        refreshStreetViewCatalog();
+    }
+
+    const contextual = Array.isArray(contextItems) && contextItems.length
+        ? contextItems.filter(hasStreetView)
+        : streetViewState.catalog;
+
+    streetViewState.currentItem = item;
+    streetViewState.contextItems = contextual;
+    setStreetMode(true);
+    renderStreetViewer(item, panorama);
+    updateStreetViewInfoPanel();
+}
+
+function navigateStreetView(step) {
+    const sequence = getStreetSequence();
+    if (!sequence.length) return;
+
+    const current = streetViewState.currentItem;
+    let index = sequence.indexOf(current);
+    if (index === -1) index = 0;
+    let nextIndex = index + step;
+    const max = sequence.length;
+    if (nextIndex < 0) {
+        nextIndex = max - 1;
+    } else if (nextIndex >= max) {
+        nextIndex = 0;
+    }
+
+    const target = sequence[nextIndex];
+    if (target) {
+        enterStreetView(target, sequence);
+    }
+}
+
+function exitStreetView() {
+    if (!streetViewState.active) return;
+    streetViewState.currentItem = null;
+    streetViewState.contextItems = [];
+    setStreetMode(false);
+    updateStreetViewInfoPanel();
+}
+
+function renderStreetViewer(item, panoramaUrl) {
+    const container = document.getElementById('street-viewer-canvas');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!window.pannellum || typeof window.pannellum.viewer !== 'function') {
+        showError('360°ビュー用ライブラリの読み込みに失敗しました。');
+        return;
+    }
+
+    const yaw = toFinite(item.streetViewYaw);
+    const pitch = toFinite(item.streetViewPitch);
+    const fov = toFinite(item.streetViewFov);
+
+    pannellumViewer = pannellum.viewer('street-viewer-canvas', {
+        type: 'equirectangular',
+        panorama: panoramaUrl,
+        autoLoad: true,
+        showControls: false,
+        showZoomCtrl: false,
+        showFullscreenCtrl: false,
+        compass: true,
+        pitch: pitch ?? 0,
+        yaw: yaw ?? 0,
+        hfov: clampFov(fov ?? 90),
+        minHfov: 45,
+        maxHfov: 120,
+        escapeHTML: true
+    });
+}
+
+function setStreetMode(isActive) {
+    streetViewState.active = isActive;
+    const body = document.body;
+    const overlay = document.getElementById('street-viewer');
+    const infoPanel = document.getElementById('streetview-info-panel');
+    const panelToggle = document.getElementById('streetview-panel-toggle');
+    if (!body || !overlay) return;
+    if (isActive) {
+        body.classList.add('street-mode');
+        overlay.setAttribute('aria-hidden', 'false');
+        hideStreetViewPopup();
+        if (infoPanel) infoPanel.classList.remove('collapsed');
+        if (panelToggle) panelToggle.setAttribute('aria-expanded', 'true');
+    } else {
+        body.classList.remove('street-mode');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+    if (map) {
+        requestAnimationFrame(() => map.resize());
+        setTimeout(() => map && map.resize(), 420);
+    }
+    const contextItems = streetViewState.contextItems.length ? streetViewState.contextItems : lastMarkerItems;
+    const markerContext = Array.isArray(contextItems) && contextItems.length ? contextItems : null;
+    updateStreetViewPanelButton(markerContext, markerContext || streetViewState.catalog);
+}
+
+function updateStreetViewInfoPanel() {
+    const titleEl = document.getElementById('streetview-current-title');
+    const metaEl = document.getElementById('streetview-current-meta');
+    const catEl = document.getElementById('streetview-current-category');
+    const carousel = document.getElementById('streetview-location-carousel');
+    const prevBtn = document.getElementById('streetview-nav-prev');
+    const nextBtn = document.getElementById('streetview-nav-next');
+    if (!titleEl || !metaEl || !catEl || !carousel) return;
+    const cleanText = (value) => (typeof value === 'string' ? value.trim() : '');
+
+    const current = streetViewState.currentItem;
+    if (!current) {
+        titleEl.textContent = 'ストリートビュー';
+        metaEl.textContent = '360°スポットを選択してください。';
+        catEl.textContent = '';
+    } else {
+        titleEl.textContent = current.title || '名称未設定スポット';
+        metaEl.textContent = getStreetMeta(current);
+        catEl.textContent = (current.category || 'スポット');
+    }
+
+    carousel.innerHTML = '';
+    const catalog = getStreetSequence();
+
+    catalog.forEach((spot) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'streetview-location-card' + (spot === current ? ' active' : '');
+
+        const thumb = document.createElement('div');
+        thumb.className = 'streetview-location-card-thumb';
+        const thumbUrl = getStreetThumbnail(spot);
+        if (thumbUrl) {
+            thumb.style.backgroundImage = `url("${thumbUrl.replace(/"/g, '\\"')}")`;
+        } else {
+            thumb.style.background = 'linear-gradient(135deg, #1e3c72, #2a5298)';
+        }
+
+        const title = document.createElement('span');
+        title.className = 'streetview-location-card-title';
+        const displayName = cleanText(spot.title) || cleanText(spot.location) || 'スポット';
+        title.textContent = displayName;
+        const normalizedDisplay = displayName.toLowerCase();
+        const subtitle = document.createElement('small');
+        const buildingText = cleanText(spot.building);
+        const locationText = cleanText(spot.location);
+        const safeCandidate = (value, compare = normalizedDisplay) => {
+            if (!value) return '';
+            return value.toLowerCase() === compare ? '' : value;
+        };
+        const buildingCandidate = safeCandidate(buildingText);
+        const locationCandidate = safeCandidate(locationText, buildingCandidate ? buildingCandidate.toLowerCase() : normalizedDisplay);
+        const subtitleText = buildingCandidate || locationCandidate;
+        if (subtitleText) {
+            subtitle.textContent = subtitleText;
+            title.appendChild(subtitle);
+        }
+
+        card.appendChild(thumb);
+        card.appendChild(title);
+
+        card.addEventListener('click', () => {
+            if (spot !== current) {
+                enterStreetView(spot, catalog);
+            }
+        });
+
+        carousel.appendChild(card);
+    });
+
+    if (!catalog.length) {
+        const emptyMsg = document.createElement('p');
+        emptyMsg.style.margin = '8px 0 0';
+        emptyMsg.style.color = 'rgba(255,255,255,0.65)';
+        emptyMsg.textContent = '360°スポットが登録されていません。';
+        carousel.appendChild(emptyMsg);
+    }
+
+    const navDisabled = !streetViewState.active || catalog.length <= 1;
+    if (prevBtn) {
+        prevBtn.disabled = navDisabled;
+    }
+    if (nextBtn) {
+        nextBtn.disabled = navDisabled;
+    }
+}
+
+function getStreetSequence() {
+    const catalogSeq = streetViewState.catalog.filter(hasStreetView);
+    if (catalogSeq.length) return catalogSeq;
+    const contextSeq = streetViewState.contextItems.filter(hasStreetView);
+    if (contextSeq.length) return contextSeq;
+    if (Array.isArray(lastMarkerItems) && lastMarkerItems.length) {
+        const markerSeq = lastMarkerItems.filter(hasStreetView);
+        if (markerSeq.length) return markerSeq;
+    }
+    return [];
+}
+
+function getStreetMeta(item) {
+    const parts = [];
+    if (item.location && item.location !== item.building) parts.push(item.location);
+    if (item.date) parts.push(item.date);
+    if (item.category) parts.push(item.category);
+    return parts.filter(Boolean).join(' / ') || 'Reitaku University';
+}
+
+function toFinite(value) {
+    const num = parseFloat(value);
+    return Number.isFinite(num) ? num : undefined;
+}
+
+function clampFov(value) {
+    return Math.min(120, Math.max(45, value));
 }
 
 // Utility functions

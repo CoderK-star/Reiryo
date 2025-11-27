@@ -1,7 +1,7 @@
 // Robustly fetch data from Google Sheets with fallback and clear errors
 const apiKey = 'AIzaSyAUi4KazffmDZV_dQUnMUKA1jJt4i0mqlU';
 const spreadsheetId = '19LosVkt3flvZfcL15k_DBLLrjOwiHWu9rYVE8ri7NQY';
-const sheetName = '2025map';
+const sheetName = '360';
 
 // Expose globally so map.js can read it (both as window property and var)
 window.dataObject = window.dataObject || [];
@@ -133,12 +133,20 @@ var dataObject = window.dataObject; // maintain legacy global var used by map.js
             const orgKeys = ['organizer','主催','担当','連絡先','問い合わせ'];
             const bldKeys = ['building','建物','棟名','施設'];
             const imgKeys = ['imageurl','image','画像','写真','thumbnail','サムネイル','img'];
+            const streetImgKeys = ['streetview','street_view','street_image','streetview_image','street 360','360','360image','360_image','panorama','pano','streetviewphoto'];
+            const streetYawKeys = ['street_yaw','streetview_yaw','yaw','heading','方角'];
+            const streetPitchKeys = ['street_pitch','streetview_pitch','pitch'];
+            const streetFovKeys = ['street_fov','streetview_fov','hfov','視野'];
             const startKeys = ['start','starttime','start_time','開始','開始時刻','開始時間','開始日','開始日時'];
             const endKeys = ['end','endtime','end_time','終了','終了時刻','終了時間','終了日','終了日時'];
             const rainLocKeys = ['rain_location','雨天場所','雨天時場所','雨天会場','雨天時会場','雨天移動先','雨天避難場所'];
             const rainBldKeys = ['rain_building','雨天建物','雨天棟名','雨天施設'];
             const rainLatKeys = ['rain_lat','雨天緯度','雨天緯度(十進)','雨天緯度（十進）'];
             const rainLonKeys = ['rain_lon','雨天経度','雨天経度(十進)','雨天経度（十進）'];
+
+            const looksLikeImage = (value) => {
+                return typeof value === 'string' && /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(value.trim());
+            };
 
             for (const row of raw) {
                 const latVal = pick(row, latKeys);
@@ -154,14 +162,21 @@ var dataObject = window.dataObject; // maintain legacy global var used by map.js
                 const rain_lat_num = parseFloat(String(rlatVal ?? '').replace(/,/g, '.'));
                 const rain_lon_num = parseFloat(String(rlonVal ?? '').replace(/,/g, '.'));
 
+                const buildingName = pick(row, bldKeys) || row.building || '';
+                const rawTitle = pick(row, titleKeys) || row.title || '';
+                const fallbackTitle = buildingName || rawTitle || row.name || '';
+                const normalizedTitle = looksLikeImage(rawTitle) ? (buildingName || row.category || row.floor || rawTitle) : (rawTitle || fallbackTitle);
+                const rawStreetImage = pick(row, streetImgKeys) || row.streetViewImage || row.streetview || '';
+                const derivedStreetImage = rawStreetImage || (looksLikeImage(row.name) ? row.name : '') || (looksLikeImage(rawTitle) ? rawTitle : '');
+
                 norm.push({
                     lat, lon,
-                    title: pick(row, titleKeys) || row.title || row.name || '',
+                    title: normalizedTitle || fallbackTitle,
                     category: pick(row, catKeys) || row.category || '',
                     explanation: pick(row, expKeys) || row.explanation || '',
                     location: pick(row, locKeys) || row.location || '',
                     organizer: pick(row, orgKeys) || row.organizer || '',
-                    building: pick(row, bldKeys) || row.building || '',
+                    building: buildingName,
                     imageUrl: pick(row, imgKeys) || row.imageUrl || row.image || '',
                     startTime: pick(row, startKeys) || row.startTime || row.start || '',
                     endTime: pick(row, endKeys) || row.endTime || row.end || '',
@@ -170,7 +185,11 @@ var dataObject = window.dataObject; // maintain legacy global var used by map.js
                     rain_location: pick(row, rainLocKeys) || row.rain_location || '',
                     rain_building: pick(row, rainBldKeys) || row.rain_building || '',
                     rain_lat: Number.isNaN(rain_lat_num) ? undefined : rain_lat_num,
-                    rain_lon: Number.isNaN(rain_lon_num) ? undefined : rain_lon_num
+                    rain_lon: Number.isNaN(rain_lon_num) ? undefined : rain_lon_num,
+                    streetViewImage: derivedStreetImage,
+                    streetViewYaw: pick(row, streetYawKeys) || row.streetViewYaw || '',
+                    streetViewPitch: pick(row, streetPitchKeys) || row.streetViewPitch || '',
+                    streetViewFov: pick(row, streetFovKeys) || row.streetViewFov || ''
                 });
             }
             if (norm.length) {
